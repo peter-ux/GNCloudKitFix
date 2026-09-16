@@ -2,7 +2,7 @@ name: Build GNCloudKitFix.dylib
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]
   workflow_dispatch:
 
 jobs:
@@ -11,6 +11,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Find iOS SDK
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)
+          if [ -z "$SDK_PATH" ]; then
+            echo "iphoneos SDK not found, trying iphonesimulator..."
+            SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          fi
+          echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
+          echo "Using SDK: $SDK_PATH"
 
       - name: Build dylib
         run: |
@@ -21,9 +31,16 @@ jobs:
             -lobjc \
             -arch arm64 \
             -miphoneos-version-min=15.0 \
-            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -isysroot ${{ env.SDK_PATH }} \
+            -install_name @executable_path/Frameworks/GNCloudKitFix.dylib \
             -o GNCloudKitFix.dylib \
             GNCloudKitFix.m
+
+      - name: Verify output
+        run: |
+          ls -la GNCloudKitFix.dylib
+          file GNCloudKitFix.dylib
+          otool -L GNCloudKitFix.dylib || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

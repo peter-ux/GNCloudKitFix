@@ -1,0 +1,32 @@
+name: Build GNCloudKitFix.dylib
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dylib
+        run: |
+          clang -dynamiclib \
+            -framework Foundation \
+            -framework CoreData \
+            -framework CloudKit \
+            -lobjc \
+            -arch arm64 \
+            -miphoneos-version-min=15.0 \
+            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -o GNCloudKitFix.dylib \
+            GNCloudKitFix.m
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GNCloudKitFix
+          path: GNCloudKitFix.dylib

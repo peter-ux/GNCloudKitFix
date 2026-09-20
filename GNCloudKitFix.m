@@ -176,13 +176,13 @@ static id hook_initWithName_managedObjectModel(id self, SEL _cmd, NSString *name
         LOG("⚠️ CloudKitContainer init 예외 발생: %@ — NSPersistentContainer로 폴백", e.reason);
     }
     
-    // CloudKit init 실패 시 → 부모 NSPersistentContainer로 폴백
+    // CloudKit init 실패 시 → NSPersistentContainer 새로 생성하여 폴백
     @try {
         Class parentClass = objc_getClass("NSPersistentContainer");
         if (parentClass) {
-            id fallback = ((id(*)(id, SEL, NSString*, NSManagedObjectModel*))
-                objc_msgSendSuper2)(
-                &(struct objc_super){self, parentClass},
+            id newObj = ((id(*)(Class, SEL))objc_msgSend)(parentClass, sel_registerName("alloc"));
+            id fallback = ((id(*)(id, SEL, NSString*, NSManagedObjectModel*))objc_msgSend)(
+                newObj,
                 @selector(initWithName:managedObjectModel:),
                 name, model);
             if (fallback) {
@@ -219,9 +219,9 @@ static id hook_initWithName(id self, SEL _cmd, NSString *name) {
     @try {
         Class parentClass = objc_getClass("NSPersistentContainer");
         if (parentClass) {
-            id fallback = ((id(*)(id, SEL, NSString*))
-                objc_msgSendSuper2)(
-                &(struct objc_super){self, parentClass},
+            id newObj = ((id(*)(Class, SEL))objc_msgSend)(parentClass, sel_registerName("alloc"));
+            id fallback = ((id(*)(id, SEL, NSString*))objc_msgSend)(
+                newObj,
                 @selector(initWithName:),
                 name);
             if (fallback) {

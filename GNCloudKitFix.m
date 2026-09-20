@@ -1,29 +1,29 @@
 /*
- * GNCloudKitFix.m
+ * GNCloudKitFix.m  (v3.0 — Final)
  * ───────────────────────────────────────────────────────────────────
- * Goodnotes 7.1.19 사이드로딩 CloudKit 크래시 해결 dylib
+ * Goodnotes 7.1.19 사이드로딩 CloudKit 크래시 완전 해결 dylib
  *
- * [원인 분석 결과]
- * 1. Goodnotes 7.1.19는 NSPersistentCloudKitContainer를 사용하여
- *    전역 appContainer를 초기화하며, 100곳 이상의 Swift guard문에서
- *    appContainer != nil 을 강제 검증함.
- * 2. 사이드로딩 환경에서는 iCloud entitlement가 없어 CloudKit 초기화가 실패,
- *    appContainer가 nil이 되어 SceneDelegate 등에서 fatalError로 크래시 발생.
- * 3. 이전 버전의 버그: NSCloudKitMirroringDelegate의 -init을 후킹하려다
- *    상속 체인을 타고 올라가 -[NSObject init] 전체가 nil을 반환하게 됨.
- *    이로 인해 +load 시점에 Datadog(__dd_private_AppLaunchHandler)가
- *    [alloc init] -> nil을 받고 0x10 번지 SIGSEGV로 즉사함.
+ * [v3.0 변경점]
+ *  v2.0에서 cloudKitContainerOptions=nil 만으로 해결되지 않은 이유:
+ *  → Goodnotes 코드가 NSPersistentCloudKitContainer init 과정에서
+ *    CKContainer 클래스를 직접 인스턴스화([CKContainer alloc] init)하여
+ *    iCloud 계정 상태를 확인함.
+ *  → 사이드로딩 환경에서 entitlement가 없으면 CloudKit 프레임워크가
+ *    즉시 NSInternalInconsistencyException을 throw.
  *
- * [해결 전략 (Apple 공식 가이드 기반)]
- * 1. NSPersistentStoreDescription의 cloudKitContainerOptions를 완전히 nil로 무력화.
- *    - setCloudKitContainerOptions: 가 호출되어도 항상 nil로 설정.
- *    - cloudKitContainerOptions getter도 항상 nil 반환.
- * 2. NSPersistentCloudKitContainer의 초기화 및 스토어 로드 시점에
- *    모든 store description의 cloudKitContainerOptions를 nil로 강제.
- *    -> 컨테이너 인스턴스는 정상 생성(non-nil)되고, Core Data는
- *       순수 로컬 SQLite(NSSQLCore) 모드로만 동작.
- * 3. NSObject나 상위 클래스의 메서드를 오염시키지 않도록 class_addMethod 기반
- *    안전한 런타임 스위즐링 적용.
+ * [최종 해결 전략]
+ *  1. NSPersistentStoreDescription의 cloudKitContainerOptions를 원천 nil 처리.
+ *  2. CKContainer의 +defaultContainer, +containerWithIdentifier: 를 후킹하여
+ *     CloudKit entitlement 예외를 @try/@catch로 감싸서 안전하게 nil 반환.
+ *  3. NSPersistentCloudKitContainer의 initWithName: 계열을 후킹하여
+ *     전체를 @try/@catch로 감싸고, CloudKit 예외 발생 시에도
+ *     부모 클래스(NSPersistentContainer)의 init으로 폴백.
+ *  4. loadPersistentStores 호출 전 store description을 재확인.
+ *  5. NSUbiquitousKeyValueStore synchronize 차단.
+ *
+ * [안전 장치]
+ *  - class_addMethod 기반 안전한 스위즐링 (부모 클래스 오염 방지)
+ *  - NSObject init은 절대로 건드리지 않음
  * ───────────────────────────────────────────────────────────────────
  */
 
@@ -44,30 +44,51 @@ static BOOL safe_swizzle_instance(Class cls, SEL sel, IMP newIMP, IMP *outOrigIM
     
     Method origMethod = class_getInstanceMethod(cls, sel);
     if (!origMethod) {
-        LOG("⚠️ 메서드 찾을 수 없음: -[%s %s]", class_getName(cls), sel_getName(sel));
+        LOG("⚠️ 메서드 없음: -[%s %s]", class_getName(cls), sel_getName(sel));
         return NO;
     }
     
     const char *types = method_getTypeEncoding(origMethod);
     *outOrigIMP = method_getImplementation(origMethod);
     
-    // 서브클래스에 먼저 추가 시도 (상속된 메서드인 경우 부모 오염 방지)
     if (class_addMethod(cls, sel, newIMP, types)) {
-        LOG("✅ 서브클래스 오버라이드 등록 성공: -[%s %s]", class_getName(cls), sel_getName(sel));
+        LOG("✅ 서브클래스 오버라이드: -[%s %s]", class_getName(cls), sel_getName(sel));
     } else {
-        // 이미 서브클래스 자체 구현이 있으면 IMP 교체
         *outOrigIMP = class_replaceMethod(cls, sel, newIMP, types);
-        LOG("✅ 기존 구현 교체 성공: -[%s %s]", class_getName(cls), sel_getName(sel));
+        LOG("✅ 구현 교체: -[%s %s]", class_getName(cls), sel_getName(sel));
+    }
+    return YES;
+}
+
+static BOOL safe_swizzle_class(Class cls, SEL sel, IMP newIMP, IMP *outOrigIMP) {
+    if (!cls) return NO;
+    
+    // 클래스 메서드는 메타클래스에 존재
+    Class metaCls = object_getClass(cls);
+    Method origMethod = class_getClassMethod(cls, sel);
+    if (!origMethod) {
+        LOG("⚠️ 클래스 메서드 없음: +[%s %s]", class_getName(cls), sel_getName(sel));
+        return NO;
+    }
+    
+    const char *types = method_getTypeEncoding(origMethod);
+    *outOrigIMP = method_getImplementation(origMethod);
+    
+    if (class_addMethod(metaCls, sel, newIMP, types)) {
+        LOG("✅ 메타클래스 오버라이드: +[%s %s]", class_getName(cls), sel_getName(sel));
+    } else {
+        *outOrigIMP = class_replaceMethod(metaCls, sel, newIMP, types);
+        LOG("✅ 메타클래스 구현 교체: +[%s %s]", class_getName(cls), sel_getName(sel));
     }
     return YES;
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 1. NSPersistentStoreDescription CloudKit 옵션 완전 무력화
+// 1. NSPersistentStoreDescription CloudKit 옵션 원천 무력화
 // ─────────────────────────────────────────────────────────────────
 static void (*orig_setCloudKitContainerOptions)(id, SEL, id) = NULL;
 static void hook_setCloudKitContainerOptions(id self, SEL _cmd, id options) {
-    LOG("NSPersistentStoreDescription setCloudKitContainerOptions: 차단 -> nil 강제");
+    // 항상 nil로 강제 — CloudKit 동기화 완전 비활성화
     if (orig_setCloudKitContainerOptions) {
         orig_setCloudKitContainerOptions(self, _cmd, nil);
     }
@@ -75,77 +96,175 @@ static void hook_setCloudKitContainerOptions(id self, SEL _cmd, id options) {
 
 static id (*orig_cloudKitContainerOptions)(id, SEL) = NULL;
 static id hook_cloudKitContainerOptions(id self, SEL _cmd) {
+    return nil;  // 항상 nil 반환
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 2. CKContainer 팩토리 메서드 후킹 (예외 방지)
+// ─────────────────────────────────────────────────────────────────
+//
+// CloudKit 프레임워크는 entitlement 없는 앱에서 CKContainer를
+// 생성하려고 하면 즉시 NSInternalInconsistencyException을 throw.
+// Goodnotes가 NSPersistentCloudKitContainer init 내부에서
+// CKContainer를 직접 생성하므로, 이를 @try/@catch로 감싸서
+// 예외를 안전하게 흡수하고 nil을 반환.
+
+static id (*orig_ck_defaultContainer)(id, SEL) = NULL;
+static id hook_ck_defaultContainer(id self, SEL _cmd) {
+    @try {
+        if (orig_ck_defaultContainer) {
+            return orig_ck_defaultContainer(self, _cmd);
+        }
+    } @catch (NSException *e) {
+        LOG("CKContainer.defaultContainer 예외 흡수: %@", e.reason);
+    }
+    return nil;
+}
+
+static id (*orig_ck_containerWithIdentifier)(id, SEL, NSString *) = NULL;
+static id hook_ck_containerWithIdentifier(id self, SEL _cmd, NSString *identifier) {
+    @try {
+        if (orig_ck_containerWithIdentifier) {
+            return orig_ck_containerWithIdentifier(self, _cmd, identifier);
+        }
+    } @catch (NSException *e) {
+        LOG("CKContainer.containerWithIdentifier: 예외 흡수: %@", e.reason);
+    }
     return nil;
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 2. Helper: Store Description에서 CloudKit 옵션 제거
+// 3. Helper: Store Description에서 CloudKit 옵션 제거
 // ─────────────────────────────────────────────────────────────────
-static void neutralize_store_descriptions(id container, const char *context) {
+static void neutralize_store_descriptions(id container) {
     if (!container) return;
     
-    if ([container respondsToSelector:@selector(persistentStoreDescriptions)]) {
-        NSArray *descriptions = [container performSelector:@selector(persistentStoreDescriptions)];
-        for (NSPersistentStoreDescription *desc in descriptions) {
-            if ([desc respondsToSelector:@selector(setCloudKitContainerOptions:)]) {
-                [desc performSelector:@selector(setCloudKitContainerOptions:) withObject:nil];
-                LOG("[%s] store url '%@' 의 cloudKitContainerOptions -> nil 설정 완료",
-                    context, desc.URL ? desc.URL.lastPathComponent : @"(no url)");
+    @try {
+        if ([container respondsToSelector:@selector(persistentStoreDescriptions)]) {
+            NSArray *descriptions = [container performSelector:@selector(persistentStoreDescriptions)];
+            for (id desc in descriptions) {
+                if ([desc respondsToSelector:@selector(setCloudKitContainerOptions:)]) {
+                    [desc performSelector:@selector(setCloudKitContainerOptions:) withObject:nil];
+                }
             }
+        }
+    } @catch (NSException *e) {
+        LOG("neutralize_store_descriptions 예외: %@", e.reason);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 4. NSPersistentCloudKitContainer 초기화 가로채기
+//    전체를 @try/@catch로 감싸서, CloudKit 예외 발생 시
+//    부모 클래스(NSPersistentContainer)의 init으로 폴백
+// ─────────────────────────────────────────────────────────────────
+static id (*orig_initWithName_managedObjectModel)(id, SEL, NSString *, NSManagedObjectModel *) = NULL;
+static id hook_initWithName_managedObjectModel(id self, SEL _cmd, NSString *name, NSManagedObjectModel *model) {
+    LOG("initWithName:managedObjectModel: 가로챔 (name: %@)", name);
+    
+    @try {
+        id result = nil;
+        if (orig_initWithName_managedObjectModel) {
+            result = orig_initWithName_managedObjectModel(self, _cmd, name, model);
+        }
+        if (result) {
+            neutralize_store_descriptions(result);
+            LOG("✅ CloudKitContainer '%@' 정상 생성 (로컬 모드)", name);
+            return result;
+        }
+    } @catch (NSException *e) {
+        LOG("⚠️ CloudKitContainer init 예외 발생: %@ — NSPersistentContainer로 폴백", e.reason);
+    }
+    
+    // CloudKit init 실패 시 → 부모 NSPersistentContainer로 폴백
+    @try {
+        Class parentClass = objc_getClass("NSPersistentContainer");
+        if (parentClass) {
+            id fallback = ((id(*)(id, SEL, NSString*, NSManagedObjectModel*))
+                objc_msgSendSuper2)(
+                &(struct objc_super){self, parentClass},
+                @selector(initWithName:managedObjectModel:),
+                name, model);
+            if (fallback) {
+                neutralize_store_descriptions(fallback);
+                LOG("✅ NSPersistentContainer 폴백 성공 (name: %@)", name);
+                return fallback;
+            }
+        }
+    } @catch (NSException *e2) {
+        LOG("❌ NSPersistentContainer 폴백도 실패: %@", e2.reason);
+    }
+    
+    return self;
+}
+
+static id (*orig_initWithName)(id, SEL, NSString *) = NULL;
+static id hook_initWithName(id self, SEL _cmd, NSString *name) {
+    LOG("initWithName: 가로챔 (name: %@)", name);
+    
+    @try {
+        id result = nil;
+        if (orig_initWithName) {
+            result = orig_initWithName(self, _cmd, name);
+        }
+        if (result) {
+            neutralize_store_descriptions(result);
+            LOG("✅ CloudKitContainer '%@' 정상 생성 (로컬 모드)", name);
+            return result;
+        }
+    } @catch (NSException *e) {
+        LOG("⚠️ CloudKitContainer initWithName: 예외: %@ — 폴백 시도", e.reason);
+    }
+    
+    @try {
+        Class parentClass = objc_getClass("NSPersistentContainer");
+        if (parentClass) {
+            id fallback = ((id(*)(id, SEL, NSString*))
+                objc_msgSendSuper2)(
+                &(struct objc_super){self, parentClass},
+                @selector(initWithName:),
+                name);
+            if (fallback) {
+                neutralize_store_descriptions(fallback);
+                LOG("✅ NSPersistentContainer 폴백 성공 (name: %@)", name);
+                return fallback;
+            }
+        }
+    } @catch (NSException *e2) {
+        LOG("❌ 폴백 실패: %@", e2.reason);
+    }
+    
+    return self;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 5. loadPersistentStores 가로채기 (최종 방어선)
+// ─────────────────────────────────────────────────────────────────
+static void (*orig_loadPersistentStores)(id, SEL, void (^)(NSPersistentStoreDescription *, NSError *)) = NULL;
+static void hook_loadPersistentStores(id self, SEL _cmd, void (^block)(NSPersistentStoreDescription *, NSError *)) {
+    neutralize_store_descriptions(self);
+    
+    @try {
+        if (orig_loadPersistentStores) {
+            orig_loadPersistentStores(self, _cmd, block);
+        }
+    } @catch (NSException *e) {
+        LOG("⚠️ loadPersistentStores 예외 흡수: %@", e.reason);
+        // 에러 콜백 호출하여 앱이 에러 핸들링 경로를 탈 수 있게
+        if (block) {
+            NSError *err = [NSError errorWithDomain:@"GNCloudKitFix"
+                                               code:-1
+                                           userInfo:@{NSLocalizedDescriptionKey: e.reason ?: @"CloudKit disabled"}];
+            block(nil, err);
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 3. NSPersistentCloudKitContainer 초기화 가로채기
-// ─────────────────────────────────────────────────────────────────
-static id (*orig_initWithName_managedObjectModel)(id, SEL, NSString *, NSManagedObjectModel *) = NULL;
-static id hook_initWithName_managedObjectModel(id self, SEL _cmd, NSString *name, NSManagedObjectModel *model) {
-    LOG("NSPersistentCloudKitContainer initWithName:managedObjectModel: 호출됨 (name: %@)", name);
-    id result = nil;
-    if (orig_initWithName_managedObjectModel) {
-        result = orig_initWithName_managedObjectModel(self, _cmd, name, model);
-    }
-    if (result) {
-        neutralize_store_descriptions(result, "initWithName:model");
-        LOG("✅ 컨테이너 '%@' 정상 생성 및 로컬 SQLite 모드 전환 완료", name);
-    }
-    return result;
-}
-
-static id (*orig_initWithName)(id, SEL, NSString *) = NULL;
-static id hook_initWithName(id self, SEL _cmd, NSString *name) {
-    LOG("NSPersistentCloudKitContainer initWithName: 호출됨 (name: %@)", name);
-    id result = nil;
-    if (orig_initWithName) {
-        result = orig_initWithName(self, _cmd, name);
-    }
-    if (result) {
-        neutralize_store_descriptions(result, "initWithName");
-        LOG("✅ 컨테이너 '%@' 정상 생성 및 로컬 SQLite 모드 전환 완료", name);
-    }
-    return result;
-}
-
-// ─────────────────────────────────────────────────────────────────
-// 4. NSPersistentCloudKitContainer loadPersistentStores 가로채기
-// (스토어를 디스크에서 열기 직전 최종적으로 CloudKit이 nil인지 재확인)
-// ─────────────────────────────────────────────────────────────────
-static void (*orig_loadPersistentStores)(id, SEL, void (^)(NSPersistentStoreDescription *, NSError *)) = NULL;
-static void hook_loadPersistentStores(id self, SEL _cmd, void (^block)(NSPersistentStoreDescription *, NSError *)) {
-    LOG("loadPersistentStoresWithCompletionHandler: 호출됨 -> 로컬 스토어로 강제");
-    neutralize_store_descriptions(self, "pre-loadStores");
-    if (orig_loadPersistentStores) {
-        orig_loadPersistentStores(self, _cmd, block);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// 5. NSUbiquitousKeyValueStore 동기화 방어 (선택적)
+// 6. NSUbiquitousKeyValueStore synchronize 차단
 // ─────────────────────────────────────────────────────────────────
 static BOOL (*orig_kv_synchronize)(id, SEL) = NULL;
 static BOOL hook_kv_synchronize(id self, SEL _cmd) {
-    LOG("NSUbiquitousKeyValueStore synchronize 차단");
     return NO;
 }
 
@@ -155,13 +274,14 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  Goodnotes 7.1.19 CloudKit Fix (v2.0 Safe) 로드  ");
+    LOG("  GNCloudKitFix v3.0 (Final Safe) 로드             ");
     LOG("══════════════════════════════════════════════════");
 
-    // CoreData 프레임워크 강제 로드
+    // CoreData/CloudKit 프레임워크 강제 로드
     dlopen("/System/Library/Frameworks/CoreData.framework/CoreData", RTLD_NOW | RTLD_GLOBAL);
+    dlopen("/System/Library/Frameworks/CloudKit.framework/CloudKit", RTLD_NOW | RTLD_GLOBAL);
 
-    // [1] NSPersistentStoreDescription 후킹
+    // ── [1] NSPersistentStoreDescription CloudKit 옵션 무력화 ──
     Class descClass = objc_getClass("NSPersistentStoreDescription");
     if (descClass) {
         safe_swizzle_instance(descClass,
@@ -173,11 +293,27 @@ static void GNCloudKitFix_initialize(void) {
             @selector(cloudKitContainerOptions),
             (IMP)hook_cloudKitContainerOptions,
             (IMP*)&orig_cloudKitContainerOptions);
-    } else {
-        LOG("⚠️ NSPersistentStoreDescription 클래스를 찾을 수 없습니다.");
+        
+        LOG("NSPersistentStoreDescription 후킹 완료");
     }
 
-    // [2] NSPersistentCloudKitContainer 후킹
+    // ── [2] CKContainer 팩토리 메서드 후킹 ──
+    Class ckClass = objc_getClass("CKContainer");
+    if (ckClass) {
+        safe_swizzle_class(ckClass,
+            @selector(defaultContainer),
+            (IMP)hook_ck_defaultContainer,
+            (IMP*)&orig_ck_defaultContainer);
+        
+        safe_swizzle_class(ckClass,
+            @selector(containerWithIdentifier:),
+            (IMP)hook_ck_containerWithIdentifier,
+            (IMP*)&orig_ck_containerWithIdentifier);
+        
+        LOG("CKContainer 팩토리 후킹 완료");
+    }
+
+    // ── [3] NSPersistentCloudKitContainer 초기화 후킹 ──
     Class ckContainerClass = objc_getClass("NSPersistentCloudKitContainer");
     if (ckContainerClass) {
         safe_swizzle_instance(ckContainerClass,
@@ -194,17 +330,19 @@ static void GNCloudKitFix_initialize(void) {
             @selector(loadPersistentStoresWithCompletionHandler:),
             (IMP)hook_loadPersistentStores,
             (IMP*)&orig_loadPersistentStores);
-    } else {
-        LOG("⚠️ NSPersistentCloudKitContainer 클래스를 찾을 수 없습니다.");
+        
+        LOG("NSPersistentCloudKitContainer 후킹 완료");
     }
 
-    // [3] NSUbiquitousKeyValueStore synchronize 후킹 (iCloud KV 스토어 에러 방지)
+    // ── [4] NSUbiquitousKeyValueStore 차단 ──
     Class kvClass = objc_getClass("NSUbiquitousKeyValueStore");
     if (kvClass) {
         safe_swizzle_instance(kvClass,
             @selector(synchronize),
             (IMP)hook_kv_synchronize,
             (IMP*)&orig_kv_synchronize);
+        
+        LOG("NSUbiquitousKeyValueStore 후킹 완료");
     }
 
     LOG("══════════════════════════════════════════════════");

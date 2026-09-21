@@ -11,45 +11,37 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "    \"management_url\": null,\n"
 "    \"entitlements\": {\n"
 "      \"apple_access\": {\n"
-"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"expires_date\": null,\n"
 "        \"grace_period_expires_date\": null,\n"
 "        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
 "      },\n"
 "      \"pro_access\": {\n"
-"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"expires_date\": null,\n"
 "        \"grace_period_expires_date\": null,\n"
 "        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
 "      },\n"
 "      \"gnc_access\": {\n"
-"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"expires_date\": null,\n"
 "        \"grace_period_expires_date\": null,\n"
 "        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
 "      },\n"
 "      \"crossplatform_access\": {\n"
-"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"expires_date\": null,\n"
 "        \"grace_period_expires_date\": null,\n"
 "        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
 "      },\n"
 "      \"full_access\": {\n"
-"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"expires_date\": null,\n"
 "        \"grace_period_expires_date\": null,\n"
 "        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
 "      }\n"
 "    },\n"
 "    \"subscriptions\": {\n"
-"      \"com.goodnotes.gn6_one_time_unlock_3999\": {\n"
-"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
-"        \"original_purchase_date\": \"2023-08-09T00:00:00Z\",\n"
-"        \"purchase_date\": \"2023-08-09T00:00:00Z\",\n"
-"        \"store\": \"app_store\",\n"
-"        \"ownership_type\": \"PURCHASED\",\n"
-"        \"is_sandbox\": false\n"
-"      },\n"
 "      \"com.goodnotes.pro_promotional\": {\n"
 "        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
 "        \"original_purchase_date\": \"2023-08-09T00:00:00Z\",\n"
@@ -59,7 +51,16 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "        \"is_sandbox\": false\n"
 "      }\n"
 "    },\n"
-"    \"non_subscriptions\": {},\n"
+"    \"non_subscriptions\": {\n"
+"      \"com.goodnotes.gn6_one_time_unlock_3999\": [\n"
+"        {\n"
+"          \"id\": \"gn7_onetime_tx_001\",\n"
+"          \"original_purchase_date\": \"2023-08-09T00:00:00Z\",\n"
+"          \"purchase_date\": \"2023-08-09T00:00:00Z\",\n"
+"          \"store\": \"app_store\"\n"
+"        }\n"
+"      ]\n"
+"    },\n"
 "    \"other_purchases\": {}\n"
 "  },\n"
 "  \"email\": \"pro@goodnotes.com\",\n"
@@ -69,7 +70,7 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "      \"status\": \"active\",\n"
 "      \"planKey\": \"pro\",\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
-"      \"expiresDateMs\": 4102444800000,\n"
+"      \"expiresDateMs\": null,\n"
 "      \"originalPurchaseDateMs\": 1600000000000,\n"
 "      \"purchaseDateMs\": 1600000000000\n"
 "    },\n"
@@ -77,7 +78,7 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "      \"status\": \"active\",\n"
 "      \"planKey\": \"pro\",\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
-"      \"expiresDateMs\": 4102444800000,\n"
+"      \"expiresDateMs\": null,\n"
 "      \"originalPurchaseDateMs\": 1600000000000,\n"
 "      \"purchaseDateMs\": 1600000000000\n"
 "    },\n"
@@ -85,7 +86,7 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "      \"status\": \"active\",\n"
 "      \"planKey\": \"pro\",\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
-"      \"expiresDateMs\": 4102444800000,\n"
+"      \"expiresDateMs\": null,\n"
 "      \"originalPurchaseDateMs\": 1600000000000,\n"
 "      \"purchaseDateMs\": 1600000000000\n"
 "    },\n"
@@ -93,7 +94,7 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "      \"status\": \"active\",\n"
 "      \"planKey\": \"pro\",\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
-"      \"expiresDateMs\": 4102444800000,\n"
+"      \"expiresDateMs\": null,\n"
 "      \"originalPurchaseDateMs\": 1600000000000,\n"
 "      \"purchaseDateMs\": 1600000000000\n"
 "    },\n"
@@ -101,22 +102,26 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "      \"status\": \"active\",\n"
 "      \"planKey\": \"pro\",\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
-"      \"expiresDateMs\": 4102444800000,\n"
+"      \"expiresDateMs\": null,\n"
 "      \"originalPurchaseDateMs\": 1600000000000,\n"
 "      \"purchaseDateMs\": 1600000000000\n"
 "    }\n"
 "  },\n"
 "  \"subscriptions\": {\n"
-"    \"com.goodnotes.gn6_one_time_unlock_3999\": {\n"
-"      \"expiresDateMs\": 4102444800000,\n"
-"      \"planKey\": \"pro\"\n"
-"    },\n"
 "    \"com.goodnotes.pro_promotional\": {\n"
 "      \"expiresDateMs\": 4102444800000,\n"
 "      \"planKey\": \"pro\"\n"
 "    }\n"
 "  },\n"
-"  \"nonSubscriptions\": {},\n"
+"  \"nonSubscriptions\": {\n"
+"    \"com.goodnotes.gn6_one_time_unlock_3999\": [\n"
+"      {\n"
+"        \"id\": \"gn7_onetime_tx_001\",\n"
+"        \"originalPurchaseDateMs\": 1600000000000,\n"
+"        \"purchaseDateMs\": 1600000000000\n"
+"      }\n"
+"    ]\n"
+"  },\n"
 "  \"currentPlans\": {\n"
 "    \"base\": {\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
@@ -214,34 +219,29 @@ static void seedUserDefaultsCache(void) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
     
-    // Seed RevenueCat cached CustomerInfo & PurchaserInfo keys
     [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
     [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
     [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.customerInfo"];
     [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
     [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
     
-    // Seed Goodnotes entitlement override flags
     [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
     [defaults setBool:YES forKey:@"com.goodnotes.gn6_unlocked"];
     [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
     
     [defaults synchronize];
-    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with Goodnotes 7 CustomerInfo cache.");
+    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with Goodnotes 7 CustomerInfo cache (v6.0).");
 }
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v5.0...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v6.0...");
     
-    // Pre-seed NSUserDefaults cache for cold launch
     seedUserDefaultsCache();
 
-    // Register custom NSURLProtocol cleanly
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
 
-    // Perform safe swizzling of session configuration
     Class configClass = [NSURLSessionConfiguration class];
     Method m_def = class_getClassMethod(configClass, @selector(defaultSessionConfiguration));
     if (m_def) {

@@ -1,4 +1,4 @@
-name: Build GNCloudKitFix.dylib
+name: Build Dylibs
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
           echo "Using SDK: $SDK_PATH"
 
-      - name: Build dylib
+      - name: Build GNCloudKitFix dylib
         run: |
           clang -dynamiclib \
             -framework Foundation \
@@ -36,14 +36,27 @@ jobs:
             -o GNCloudKitFix.dylib \
             GNCloudKitFix.m
 
+      - name: Build GN7RevenueCatFix dylib
+        run: |
+          clang -dynamiclib \
+            -framework Foundation \
+            -lobjc \
+            -arch arm64 \
+            -miphoneos-version-min=15.0 \
+            -isysroot ${{ env.SDK_PATH }} \
+            -install_name @executable_path/Frameworks/GN7RevenueCatFix.dylib \
+            -o GN7RevenueCatFix.dylib \
+            GN7RevenueCatFix.m
+
       - name: Verify output
         run: |
-          ls -la GNCloudKitFix.dylib
-          file GNCloudKitFix.dylib
-          otool -L GNCloudKitFix.dylib || true
+          ls -la *.dylib
+          file *.dylib
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GNCloudKitFix
-          path: GNCloudKitFix.dylib
+          name: dylibs
+          path: |
+            GNCloudKitFix.dylib
+            GN7RevenueCatFix.dylib

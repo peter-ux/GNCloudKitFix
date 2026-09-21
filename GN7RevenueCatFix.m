@@ -72,8 +72,6 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "  \"entitlementVerification\": \"NOT_REQUESTED\"\n"
 "}";
 
-static id (*orig_dataTaskWithRequest_completionHandler)(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error));
-
 static BOOL shouldInterceptURL(NSURL *url) {
     if (!url) return NO;
     NSString *urlString = [url absoluteString].lowercaseString;
@@ -88,10 +86,55 @@ static BOOL shouldInterceptURL(NSURL *url) {
     return NO;
 }
 
+// Custom NSURLProtocol to guarantee 100% request interception
+@interface GN7URLProtocol : NSURLProtocol
+@end
+
+@implementation GN7URLProtocol
+
++ (BOOL)canInitWithRequest:(NSURLRequest *)request {
+    if ([NSURLProtocol propertyForKey:@"GN7URLProtocolHandled" inRequest:request]) {
+        return NO;
+    }
+    return shouldInterceptURL(request.URL);
+}
+
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
+    return request;
+}
+
+- (void)startLoading {
+    NSMutableURLRequest *newRequest = [self.request mutableCopy];
+    [NSURLProtocol setProperty:@YES forKey:@"GN7URLProtocolHandled" inRequest:newRequest];
+    
+    NSLog(@"[GN7URLProtocol] Intercepted URL: %@", self.request.URL);
+    
+    NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
+    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL
+                                                              statusCode:200
+                                                             HTTPVersion:@"HTTP/1.1"
+                                                            headerFields:@{
+                                                                @"Content-Type": @"application/json",
+                                                                @"X-RevenueCat-ETag": @"gn7_mock_etag_2026"
+                                                            }];
+    
+    [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+    [self.client URLProtocol:self didLoadData:mockData];
+    [self.client URLProtocolDidFinishLoading:self];
+}
+
+- (void)stopLoading {
+}
+
+@end
+
+// Swizzling __NSCFURLSession directly
+static id (*orig_dataTaskWithRequest_completionHandler)(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error));
+
 static id swizzled_dataTaskWithRequest_completionHandler(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error)) {
     NSURL *url = request.URL;
     if (shouldInterceptURL(url) && completionHandler) {
-        NSLog(@"[GN7RevenueCatFix] Intercepting request to: %@", url);
+        NSLog(@"[GN7RevenueCatFix] Swizzle Intercepted request to: %@", url);
         NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
         NSHTTPURLResponse *mockResponse = [[NSHTTPURLResponse alloc] initWithURL:url
                                                                      statusCode:200
@@ -110,19 +153,62 @@ static id swizzled_dataTaskWithRequest_completionHandler(id self, SEL _cmd, NSUR
     return orig_dataTaskWithRequest_completionHandler(self, _cmd, request, completionHandler);
 }
 
+// Swizzle NSURLSessionConfiguration to inject GN7URLProtocol into all session configs
+static NSURLSessionConfiguration *(*orig_defaultSessionConfiguration)(id self, SEL _cmd);
+static NSURLSessionConfiguration *(*orig_ephemeralSessionConfiguration)(id self, SEL _cmd);
+
+static NSURLSessionConfiguration *swizzled_defaultSessionConfiguration(id self, SEL _cmd) {
+    NSURLSessionConfiguration *config = orig_defaultSessionConfiguration(self, _cmd);
+    NSMutableArray *protocols = [config.protocolClasses mutableCopy];
+    if (!protocols) protocols = [NSMutableArray array];
+    if (![protocols containsObject:[GN7URLProtocol class]]) {
+        [protocols insertObject:[GN7URLProtocol class] atIndex:0];
+        config.protocolClasses = protocols;
+    }
+    return config;
+}
+
+static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self, SEL _cmd) {
+    NSURLSessionConfiguration *config = orig_ephemeralSessionConfiguration(self, _cmd);
+    NSMutableArray *protocols = [config.protocolClasses mutableCopy];
+    if (!protocols) protocols = [NSMutableArray array];
+    if (![protocols containsObject:[GN7URLProtocol class]]) {
+        [protocols insertObject:[GN7URLProtocol class] atIndex:0];
+        config.protocolClasses = protocols;
+    }
+    return config;
+}
+
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v2.0...");
     
-    Class sessionClass = [NSURLSession class];
+    // 1. Register custom NSURLProtocol
+    [NSURLProtocol registerClass:[GN7URLProtocol class]];
+    NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
+
+    // 2. Swizzle NSURLSessionConfiguration default & ephemeral configs
+    Class configClass = [NSURLSessionConfiguration class];
+    Method m_def = class_getClassMethod(configClass, @selector(defaultSessionConfiguration));
+    if (m_def) {
+        orig_defaultSessionConfiguration = (void *)method_getImplementation(m_def);
+        method_setImplementation(m_def, (IMP)swizzled_defaultSessionConfiguration);
+    }
+    Method m_eph = class_getClassMethod(configClass, @selector(ephemeralSessionConfiguration));
+    if (m_eph) {
+        orig_ephemeralSessionConfiguration = (void *)method_getImplementation(m_eph);
+        method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
+    }
+
+    // 3. Swizzle __NSCFURLSession directly (private implementation class)
+    Class cls = NSClassFromString(@"__NSCFURLSession");
+    if (!cls) cls = [NSURLSession class];
+    
     SEL sel = @selector(dataTaskWithRequest:completionHandler:);
-    Method method = class_getInstanceMethod(sessionClass, sel);
-    
+    Method method = class_getInstanceMethod(cls, sel);
     if (method) {
         orig_dataTaskWithRequest_completionHandler = (void *)method_getImplementation(method);
         method_setImplementation(method, (IMP)swizzled_dataTaskWithRequest_completionHandler);
-        NSLog(@"[GN7RevenueCatFix] Successfully swizzled -[NSURLSession dataTaskWithRequest:completionHandler:]");
-    } else {
-        NSLog(@"[GN7RevenueCatFix] Warning: Could not find method -[NSURLSession dataTaskWithRequest:completionHandler:]");
+        NSLog(@"[GN7RevenueCatFix] Successfully swizzled -[%@ dataTaskWithRequest:completionHandler:]", NSStringFromClass(cls));
     }
 }

@@ -185,30 +185,6 @@ static BOOL shouldInterceptURL(NSURL *url) {
 
 @end
 
-static id (*orig_dataTaskWithRequest_completionHandler)(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error));
-
-static id swizzled_dataTaskWithRequest_completionHandler(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error)) {
-    NSURL *url = request.URL;
-    if (shouldInterceptURL(url) && completionHandler) {
-        NSLog(@"[GN7RevenueCatFix] Swizzle Intercepted request to: %@", url);
-        NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
-        NSHTTPURLResponse *mockResponse = [[NSHTTPURLResponse alloc] initWithURL:url
-                                                                     statusCode:200
-                                                                    HTTPVersion:@"HTTP/1.1"
-                                                                   headerFields:@{
-                                                                       @"Content-Type": @"application/json",
-                                                                       @"X-RevenueCat-ETag": @"gn7_mock_etag_2026"
-                                                                   }];
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            completionHandler(mockData, mockResponse, nil);
-        });
-        
-        return orig_dataTaskWithRequest_completionHandler(self, _cmd, [NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]], ^(NSData *d, NSURLResponse *r, NSError *e){});
-    }
-    
-    return orig_dataTaskWithRequest_completionHandler(self, _cmd, request, completionHandler);
-}
-
 static NSURLSessionConfiguration *(*orig_defaultSessionConfiguration)(id self, SEL _cmd);
 static NSURLSessionConfiguration *(*orig_ephemeralSessionConfiguration)(id self, SEL _cmd);
 
@@ -236,11 +212,13 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v3.0...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v4.0 (Thread-Safe)...");
     
+    // Register custom NSURLProtocol cleanly without acquiring ObjC class locks during constructor
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
 
+    // Perform safe swizzling of session configuration
     Class configClass = [NSURLSessionConfiguration class];
     Method m_def = class_getClassMethod(configClass, @selector(defaultSessionConfiguration));
     if (m_def) {
@@ -251,16 +229,5 @@ static void GN7RevenueCatFixInit(void) {
     if (m_eph) {
         orig_ephemeralSessionConfiguration = (void *)method_getImplementation(m_eph);
         method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
-    }
-
-    Class cls = NSClassFromString(@"__NSCFURLSession");
-    if (!cls) cls = [NSURLSession class];
-    
-    SEL sel = @selector(dataTaskWithRequest:completionHandler:);
-    Method method = class_getInstanceMethod(cls, sel);
-    if (method) {
-        orig_dataTaskWithRequest_completionHandler = (void *)method_getImplementation(method);
-        method_setImplementation(method, (IMP)swizzled_dataTaskWithRequest_completionHandler);
-        NSLog(@"[GN7RevenueCatFix] Successfully swizzled -[%@ dataTaskWithRequest:completionHandler:]", NSStringFromClass(cls));
     }
 }

@@ -210,11 +210,34 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
     return config;
 }
 
+static void seedUserDefaultsCache(void) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
+    
+    // Seed RevenueCat cached CustomerInfo & PurchaserInfo keys
+    [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
+    [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
+    [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.customerInfo"];
+    [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
+    [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
+    
+    // Seed Goodnotes entitlement override flags
+    [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
+    [defaults setBool:YES forKey:@"com.goodnotes.gn6_unlocked"];
+    [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
+    
+    [defaults synchronize];
+    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with Goodnotes 7 CustomerInfo cache.");
+}
+
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v4.0 (Thread-Safe)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v5.0...");
     
-    // Register custom NSURLProtocol cleanly without acquiring ObjC class locks during constructor
+    // Pre-seed NSUserDefaults cache for cold launch
+    seedUserDefaultsCache();
+
+    // Register custom NSURLProtocol cleanly
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
 

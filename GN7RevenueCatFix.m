@@ -21,10 +21,36 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "        \"grace_period_expires_date\": null,\n"
 "        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
+"      },\n"
+"      \"gnc_access\": {\n"
+"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"grace_period_expires_date\": null,\n"
+"        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
+"        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
+"      },\n"
+"      \"crossplatform_access\": {\n"
+"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"grace_period_expires_date\": null,\n"
+"        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
+"        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
+"      },\n"
+"      \"full_access\": {\n"
+"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"grace_period_expires_date\": null,\n"
+"        \"product_identifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
+"        \"purchase_date\": \"2023-08-09T00:00:00Z\"\n"
 "      }\n"
 "    },\n"
 "    \"subscriptions\": {\n"
 "      \"com.goodnotes.gn6_one_time_unlock_3999\": {\n"
+"        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
+"        \"original_purchase_date\": \"2023-08-09T00:00:00Z\",\n"
+"        \"purchase_date\": \"2023-08-09T00:00:00Z\",\n"
+"        \"store\": \"app_store\",\n"
+"        \"ownership_type\": \"PURCHASED\",\n"
+"        \"is_sandbox\": false\n"
+"      },\n"
+"      \"com.goodnotes.pro_promotional\": {\n"
 "        \"expires_date\": \"2099-12-31T23:59:59Z\",\n"
 "        \"original_purchase_date\": \"2023-08-09T00:00:00Z\",\n"
 "        \"purchase_date\": \"2023-08-09T00:00:00Z\",\n"
@@ -54,10 +80,38 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "      \"expiresDateMs\": 4102444800000,\n"
 "      \"originalPurchaseDateMs\": 1600000000000,\n"
 "      \"purchaseDateMs\": 1600000000000\n"
+"    },\n"
+"    \"gnc_access\": {\n"
+"      \"status\": \"active\",\n"
+"      \"planKey\": \"pro\",\n"
+"      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
+"      \"expiresDateMs\": 4102444800000,\n"
+"      \"originalPurchaseDateMs\": 1600000000000,\n"
+"      \"purchaseDateMs\": 1600000000000\n"
+"    },\n"
+"    \"crossplatform_access\": {\n"
+"      \"status\": \"active\",\n"
+"      \"planKey\": \"pro\",\n"
+"      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
+"      \"expiresDateMs\": 4102444800000,\n"
+"      \"originalPurchaseDateMs\": 1600000000000,\n"
+"      \"purchaseDateMs\": 1600000000000\n"
+"    },\n"
+"    \"full_access\": {\n"
+"      \"status\": \"active\",\n"
+"      \"planKey\": \"pro\",\n"
+"      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
+"      \"expiresDateMs\": 4102444800000,\n"
+"      \"originalPurchaseDateMs\": 1600000000000,\n"
+"      \"purchaseDateMs\": 1600000000000\n"
 "    }\n"
 "  },\n"
 "  \"subscriptions\": {\n"
 "    \"com.goodnotes.gn6_one_time_unlock_3999\": {\n"
+"      \"expiresDateMs\": 4102444800000,\n"
+"      \"planKey\": \"pro\"\n"
+"    },\n"
+"    \"com.goodnotes.pro_promotional\": {\n"
 "      \"expiresDateMs\": 4102444800000,\n"
 "      \"planKey\": \"pro\"\n"
 "    }\n"
@@ -67,6 +121,10 @@ static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
 "    \"base\": {\n"
 "      \"productIdentifier\": \"com.goodnotes.gn6_one_time_unlock_3999\",\n"
 "      \"planKey\": \"pro\"\n"
+"    },\n"
+"    \"ai\": {\n"
+"      \"productIdentifier\": \"com.goodnotes.plus.ai.premium_7dt_1y_2999\",\n"
+"      \"planKey\": \"premium\"\n"
 "    }\n"
 "  },\n"
 "  \"entitlementVerification\": \"NOT_REQUESTED\"\n"
@@ -86,7 +144,6 @@ static BOOL shouldInterceptURL(NSURL *url) {
     return NO;
 }
 
-// Custom NSURLProtocol to guarantee 100% request interception
 @interface GN7URLProtocol : NSURLProtocol
 @end
 
@@ -128,7 +185,6 @@ static BOOL shouldInterceptURL(NSURL *url) {
 
 @end
 
-// Swizzling __NSCFURLSession directly
 static id (*orig_dataTaskWithRequest_completionHandler)(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error));
 
 static id swizzled_dataTaskWithRequest_completionHandler(id self, SEL _cmd, NSURLRequest *request, void (^completionHandler)(NSData *data, NSURLResponse *response, NSError *error)) {
@@ -153,7 +209,6 @@ static id swizzled_dataTaskWithRequest_completionHandler(id self, SEL _cmd, NSUR
     return orig_dataTaskWithRequest_completionHandler(self, _cmd, request, completionHandler);
 }
 
-// Swizzle NSURLSessionConfiguration to inject GN7URLProtocol into all session configs
 static NSURLSessionConfiguration *(*orig_defaultSessionConfiguration)(id self, SEL _cmd);
 static NSURLSessionConfiguration *(*orig_ephemeralSessionConfiguration)(id self, SEL _cmd);
 
@@ -181,13 +236,11 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v2.0...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v3.0...");
     
-    // 1. Register custom NSURLProtocol
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
 
-    // 2. Swizzle NSURLSessionConfiguration default & ephemeral configs
     Class configClass = [NSURLSessionConfiguration class];
     Method m_def = class_getClassMethod(configClass, @selector(defaultSessionConfiguration));
     if (m_def) {
@@ -200,7 +253,6 @@ static void GN7RevenueCatFixInit(void) {
         method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
     }
 
-    // 3. Swizzle __NSCFURLSession directly (private implementation class)
     Class cls = NSClassFromString(@"__NSCFURLSession");
     if (!cls) cls = [NSURLSession class];
     

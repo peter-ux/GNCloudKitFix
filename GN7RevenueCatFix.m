@@ -215,43 +215,13 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
     return config;
 }
 
-static void seedUserDefaultsCache(void) {
-    @try {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
-        NSError *error = nil;
-        NSDictionary *mockDict = [NSJSONSerialization JSONObjectWithData:mockData options:0 error:&error];
-        
-        if (mockDict && [mockDict isKindOfClass:[NSDictionary class]]) {
-            [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
-            [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
-            [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.customerInfo"];
-        }
-        
-        [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
-        [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
-        [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
-        [defaults setBool:YES forKey:@"com.goodnotes.gn6_unlocked"];
-        [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
-        
-        [defaults synchronize];
-        NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v8.2).");
-    } @catch (NSException *exception) {
-        NSLog(@"[GN7RevenueCatFix] Caught exception while seeding NSUserDefaults: %@", exception);
-    }
-}
-
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.3 (Pure Protocol Safe)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.4 (Pure Dynamic Interception)...");
     
     // Register custom NSURLProtocol safely during constructor
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
-    NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
-
-    // Delay 1.0s on main queue to ensure UI & CoreData preferences are fully ready before seeding
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        seedUserDefaultsCache();
-    });
+    NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol successfully.");
 }
+
 

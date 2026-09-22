@@ -154,27 +154,16 @@ static id hook_cloudKitContainerOptions(id self, SEL _cmd) {
 
 static id (*orig_ck_defaultContainer)(id, SEL) = NULL;
 static id hook_ck_defaultContainer(id self, SEL _cmd) {
-    @try {
-        if (orig_ck_defaultContainer) {
-            id res = orig_ck_defaultContainer(self, _cmd);
-            if (res) return res;
-        }
-    } @catch (NSException *e) {
-        LOG("CKContainer.defaultContainer 예외 -> GNMockCKContainer 반환: %@", e.reason);
-    }
+    // NEVER call original — iOS 27 uses brk/SIGTRAP (not NSException) for
+    // entitlement failures inside dispatch_once, which @try/@catch cannot intercept.
+    LOG("CKContainer.defaultContainer → GNMockCKContainer 반환");
     return [GNMockCKContainer sharedMock];
 }
 
 static id (*orig_ck_containerWithIdentifier)(id, SEL, NSString *) = NULL;
 static id hook_ck_containerWithIdentifier(id self, SEL _cmd, NSString *identifier) {
-    @try {
-        if (orig_ck_containerWithIdentifier) {
-            id res = orig_ck_containerWithIdentifier(self, _cmd, identifier);
-            if (res) return res;
-        }
-    } @catch (NSException *e) {
-        LOG("CKContainer.containerWithIdentifier: 예외 -> GNMockCKContainer 반환: %@", e.reason);
-    }
+    // NEVER call original — same SIGTRAP issue as defaultContainer
+    LOG("CKContainer.containerWithIdentifier:%@ → GNMockCKContainer 반환", identifier);
     return [GNMockCKContainer sharedMock];
 }
 
@@ -374,7 +363,7 @@ static BOOL hook_setActive_options_error(id self, SEL _cmd, BOOL active, AVAudio
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  GNCloudKitFix v4.3 (AudioSession Safe) 로드       ");
+    LOG("  GNCloudKitFix v4.4 (No Original CKContainer) 로드       ");
     LOG("══════════════════════════════════════════════════");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -476,7 +465,7 @@ static void GNCloudKitFix_initialize(void) {
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.3 초기화 완료 (Hybrid Active)    ");
+        LOG("  GNCloudKitFix v4.4 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }

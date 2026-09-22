@@ -100,37 +100,81 @@ static id hook_cloudKitContainerOptions(id self, SEL _cmd) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 2. CKContainer 팩토리 메서드 후킹 (예외 방지)
+// 2. Mock CKContainer (Safe Stub Object)
 // ─────────────────────────────────────────────────────────────────
-//
-// CloudKit 프레임워크는 entitlement 없는 앱에서 CKContainer를
-// 생성하려고 하면 즉시 NSInternalInconsistencyException을 throw.
-// Goodnotes가 NSPersistentCloudKitContainer init 내부에서
-// CKContainer를 직접 생성하므로, 이를 @try/@catch로 감싸서
-// 예외를 안전하게 흡수하고 nil을 반환.
+@interface GNMockCKContainer : NSObject
++ (instancetype)sharedMock;
+@end
+
+@implementation GNMockCKContainer
++ (instancetype)sharedMock {
+    static GNMockCKContainer *instance = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[GNMockCKContainer alloc] init];
+    });
+    return instance;
+}
+
+- (void)accountStatusWithCompletionHandler:(void(^)(NSInteger accountStatus, NSError *error))completionHandler {
+    if (completionHandler) {
+        NSError *err = [NSError errorWithDomain:@"CKErrorDomain" code:9 userInfo:@{NSLocalizedDescriptionKey: @"iCloud account not authenticated"}];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completionHandler(2 /* CKAccountStatusNoAccount */, err);
+        });
+    }
+}
+
+- (void)statusForApplicationPermission:(NSUInteger)permission completionHandler:(void(^)(NSInteger status, NSError *error))completionHandler {
+    if (completionHandler) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completionHandler(0 /* CKApplicationPermissionStatusInitialState */, nil);
+        });
+    }
+}
+
+- (id)privateCloudDatabase { return nil; }
+- (id)publicCloudDatabase { return nil; }
+- (id)sharedCloudDatabase { return nil; }
+- (id)containerIdentifier { return @"iCloud.com.goodnotes.container"; }
+
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)aSelector {
+    NSMethodSignature *sig = [super methodSignatureForSelector:aSelector];
+    if (!sig) {
+        sig = [NSMethodSignature signatureWithObjCTypes:"v@:"];
+    }
+    return sig;
+}
+
+- (void)forwardInvocation:(NSInvocation *)anInvocation {
+    LOG("GNMockCKContainer ignored method: %s", sel_getName([anInvocation selector]));
+}
+@end
 
 static id (*orig_ck_defaultContainer)(id, SEL) = NULL;
 static id hook_ck_defaultContainer(id self, SEL _cmd) {
     @try {
         if (orig_ck_defaultContainer) {
-            return orig_ck_defaultContainer(self, _cmd);
+            id res = orig_ck_defaultContainer(self, _cmd);
+            if (res) return res;
         }
     } @catch (NSException *e) {
-        LOG("CKContainer.defaultContainer 예외 흡수: %@", e.reason);
+        LOG("CKContainer.defaultContainer 예외 -> GNMockCKContainer 반환: %@", e.reason);
     }
-    return nil;
+    return [GNMockCKContainer sharedMock];
 }
 
 static id (*orig_ck_containerWithIdentifier)(id, SEL, NSString *) = NULL;
 static id hook_ck_containerWithIdentifier(id self, SEL _cmd, NSString *identifier) {
     @try {
         if (orig_ck_containerWithIdentifier) {
-            return orig_ck_containerWithIdentifier(self, _cmd, identifier);
+            id res = orig_ck_containerWithIdentifier(self, _cmd, identifier);
+            if (res) return res;
         }
     } @catch (NSException *e) {
-        LOG("CKContainer.containerWithIdentifier: 예외 흡수: %@", e.reason);
+        LOG("CKContainer.containerWithIdentifier: 예외 -> GNMockCKContainer 반환: %@", e.reason);
     }
-    return nil;
+    return [GNMockCKContainer sharedMock];
 }
 
 // ─────────────────────────────────────────────────────────────────

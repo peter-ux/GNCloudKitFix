@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
 static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
@@ -235,12 +234,12 @@ static void seedUserDefaultsCache(void) {
     [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
     
     [defaults synchronize];
-    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v8.0).");
+    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v8.1).");
 }
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.0 (Dyld Safe)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.1 (Dyld Safe)...");
     
     // Register custom NSURLProtocol safely during constructor
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
@@ -258,11 +257,8 @@ static void GN7RevenueCatFixInit(void) {
         method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
     }
 
-    // Safely seed NSUserDefaults after dyld finishes constructor loading and Foundation is ready
-    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:^(NSNotification * _Nonnull note) {
+    // Safely seed NSUserDefaults on main dispatch queue once main runloop starts
+    dispatch_async(dispatch_get_main_queue(), ^{
         seedUserDefaultsCache();
-    }];
+    });
 }

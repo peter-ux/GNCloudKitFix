@@ -29,6 +29,7 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
+#import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <dlfcn.h>
@@ -313,12 +314,67 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// [5] AVAudioSession 안전 훅 — iOS 27 AudioSession 데드락 방지
+// Goodnotes가 메인 스레드에서 동기적으로 setCategory를 호출하면
+// AudioSession - RootQueue와 데드락이 발생하므로 비동기로 지연
+// ─────────────────────────────────────────────────────────────────
+static BOOL (*orig_setCategory_mode_options_error)(id, SEL, AVAudioSessionCategory, AVAudioSessionMode, AVAudioSessionCategoryOptions, NSError**) = NULL;
+static BOOL hook_setCategory_mode_options_error(id self, SEL _cmd, AVAudioSessionCategory category, AVAudioSessionMode mode, AVAudioSessionCategoryOptions options, NSError **outError) {
+    // During initial app launch, defer AudioSession setup to avoid deadlock
+    static BOOL initialSetupDone = NO;
+    if (!initialSetupDone) {
+        initialSetupDone = YES;
+        LOG("AVAudioSession setCategory 지연 (데드락 방지): %@", category);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *err = nil;
+            if (orig_setCategory_mode_options_error) {
+                orig_setCategory_mode_options_error(self, _cmd, category, mode, options, &err);
+            }
+            if (err) {
+                LOG("⚠️ 지연된 setCategory 에러: %@", err);
+            } else {
+                LOG("✅ 지연된 setCategory 성공: %@", category);
+            }
+        });
+        return YES;
+    }
+    // After first setup, pass through normally
+    if (orig_setCategory_mode_options_error) {
+        return orig_setCategory_mode_options_error(self, _cmd, category, mode, options, outError);
+    }
+    return YES;
+}
+
+static BOOL (*orig_setActive_options_error)(id, SEL, BOOL, AVAudioSessionSetActiveOptions, NSError**) = NULL;
+static BOOL hook_setActive_options_error(id self, SEL _cmd, BOOL active, AVAudioSessionSetActiveOptions options, NSError **outError) {
+    static BOOL firstActivation = NO;
+    if (!firstActivation) {
+        firstActivation = YES;
+        LOG("AVAudioSession setActive 지연 (데드락 방지): %@", active ? @"YES" : @"NO");
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *err = nil;
+            if (orig_setActive_options_error) {
+                orig_setActive_options_error(self, _cmd, active, options, &err);
+            }
+            if (err) {
+                LOG("⚠️ 지연된 setActive 에러: %@", err);
+            }
+        });
+        return YES;
+    }
+    if (orig_setActive_options_error) {
+        return orig_setActive_options_error(self, _cmd, active, options, outError);
+    }
+    return YES;
+}
+
+// ─────────────────────────────────────────────────────────────────
 // 생성자: dylib 로드 시 1회 실행
 // ─────────────────────────────────────────────────────────────────
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  GNCloudKitFix v4.2 (Hybrid Timing) 로드           ");
+    LOG("  GNCloudKitFix v4.3 (AudioSession Safe) 로드       ");
     LOG("══════════════════════════════════════════════════");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -327,9 +383,10 @@ static void GNCloudKitFix_initialize(void) {
     // These prevent CloudKit entitlement exceptions during app delegate init
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    // CoreData/CloudKit 프레임워크 강제 로드
+    // CoreData/CloudKit/AVFoundation 프레임워크 강제 로드
     dlopen("/System/Library/Frameworks/CoreData.framework/CoreData", RTLD_NOW | RTLD_GLOBAL);
     dlopen("/System/Library/Frameworks/CloudKit.framework/CloudKit", RTLD_NOW | RTLD_GLOBAL);
+    dlopen("/System/Library/Frameworks/AVFoundation.framework/AVFoundation", RTLD_NOW | RTLD_GLOBAL);
 
     // ── [1] NSPersistentStoreDescription CloudKit 옵션 무력화 ──
     Class descClass = objc_getClass("NSPersistentStoreDescription");
@@ -363,7 +420,23 @@ static void GNCloudKitFix_initialize(void) {
         LOG("CKContainer 팩토리 후킹 완료 (즉시)");
     }
 
-    LOG("Phase 1 완료 — CloudKit 예외 방어 활성화");
+    // ── [5] AVAudioSession 데드락 방지 후킹 ──
+    Class audioClass = objc_getClass("AVAudioSession");
+    if (audioClass) {
+        safe_swizzle_instance(audioClass,
+            @selector(setCategory:mode:options:error:),
+            (IMP)hook_setCategory_mode_options_error,
+            (IMP*)&orig_setCategory_mode_options_error);
+        
+        safe_swizzle_instance(audioClass,
+            @selector(setActive:withOptions:error:),
+            (IMP)hook_setActive_options_error,
+            (IMP*)&orig_setActive_options_error);
+        
+        LOG("AVAudioSession 데드락 방지 후킹 완료 (즉시)");
+    }
+
+    LOG("Phase 1 완료 — CloudKit + AudioSession 방어 활성화");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PHASE 2: DEFERRED (main queue) — Heavier hooks after system init
@@ -403,7 +476,7 @@ static void GNCloudKitFix_initialize(void) {
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.2 초기화 완료 (Hybrid Active)    ");
+        LOG("  GNCloudKitFix v4.3 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }

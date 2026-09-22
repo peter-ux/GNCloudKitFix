@@ -243,26 +243,14 @@ static void seedUserDefaultsCache(void) {
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.2 (Dyld Safe)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.3 (Pure Protocol Safe)...");
     
     // Register custom NSURLProtocol safely during constructor
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
 
-    Class configClass = [NSURLSessionConfiguration class];
-    Method m_def = class_getClassMethod(configClass, @selector(defaultSessionConfiguration));
-    if (m_def) {
-        orig_defaultSessionConfiguration = (void *)method_getImplementation(m_def);
-        method_setImplementation(m_def, (IMP)swizzled_defaultSessionConfiguration);
-    }
-    Method m_eph = class_getClassMethod(configClass, @selector(ephemeralSessionConfiguration));
-    if (m_eph) {
-        orig_ephemeralSessionConfiguration = (void *)method_getImplementation(m_eph);
-        method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
-    }
-
-    // Delay 0.5s on main queue to ensure CFPreferences and app sandboxed preferences plist search paths are fully initialized
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // Delay 1.0s on main queue to ensure UI & CoreData preferences are fully ready before seeding
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         seedUserDefaultsCache();
     });
 }

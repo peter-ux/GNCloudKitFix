@@ -317,48 +317,59 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
 // ─────────────────────────────────────────────────────────────────
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
-    // Defer initialization to main queue to allow iOS AudioSession and system services to initialize first
+    LOG("══════════════════════════════════════════════════");
+    LOG("  GNCloudKitFix v4.2 (Hybrid Timing) 로드           ");
+    LOG("══════════════════════════════════════════════════");
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // PHASE 1: IMMEDIATE (constructor) — Must run before didFinishLaunching
+    // CKContainer factory + NSPersistentStoreDescription hooks
+    // These prevent CloudKit entitlement exceptions during app delegate init
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    // CoreData/CloudKit 프레임워크 강제 로드
+    dlopen("/System/Library/Frameworks/CoreData.framework/CoreData", RTLD_NOW | RTLD_GLOBAL);
+    dlopen("/System/Library/Frameworks/CloudKit.framework/CloudKit", RTLD_NOW | RTLD_GLOBAL);
+
+    // ── [1] NSPersistentStoreDescription CloudKit 옵션 무력화 ──
+    Class descClass = objc_getClass("NSPersistentStoreDescription");
+    if (descClass) {
+        safe_swizzle_instance(descClass,
+            @selector(setCloudKitContainerOptions:),
+            (IMP)hook_setCloudKitContainerOptions,
+            (IMP*)&orig_setCloudKitContainerOptions);
+
+        safe_swizzle_instance(descClass,
+            @selector(cloudKitContainerOptions),
+            (IMP)hook_cloudKitContainerOptions,
+            (IMP*)&orig_cloudKitContainerOptions);
+        
+        LOG("NSPersistentStoreDescription 후킹 완료 (즉시)");
+    }
+
+    // ── [2] CKContainer 팩토리 메서드 후킹 ──
+    Class ckClass = objc_getClass("CKContainer");
+    if (ckClass) {
+        safe_swizzle_class(ckClass,
+            @selector(defaultContainer),
+            (IMP)hook_ck_defaultContainer,
+            (IMP*)&orig_ck_defaultContainer);
+        
+        safe_swizzle_class(ckClass,
+            @selector(containerWithIdentifier:),
+            (IMP)hook_ck_containerWithIdentifier,
+            (IMP*)&orig_ck_containerWithIdentifier);
+        
+        LOG("CKContainer 팩토리 후킹 완료 (즉시)");
+    }
+
+    LOG("Phase 1 완료 — CloudKit 예외 방어 활성화");
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // PHASE 2: DEFERRED (main queue) — Heavier hooks after system init
+    // NSPersistentCloudKitContainer + NSUbiquitousKeyValueStore
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     dispatch_async(dispatch_get_main_queue(), ^{
-        LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.1 (Deferred Safe Mode) 로드      ");
-        LOG("══════════════════════════════════════════════════");
-
-        // CoreData/CloudKit 프레임워크 강제 로드
-        dlopen("/System/Library/Frameworks/CoreData.framework/CoreData", RTLD_NOW | RTLD_GLOBAL);
-        dlopen("/System/Library/Frameworks/CloudKit.framework/CloudKit", RTLD_NOW | RTLD_GLOBAL);
-
-        // ── [1] NSPersistentStoreDescription CloudKit 옵션 무력화 ──
-        Class descClass = objc_getClass("NSPersistentStoreDescription");
-        if (descClass) {
-            safe_swizzle_instance(descClass,
-                @selector(setCloudKitContainerOptions:),
-                (IMP)hook_setCloudKitContainerOptions,
-                (IMP*)&orig_setCloudKitContainerOptions);
-
-            safe_swizzle_instance(descClass,
-                @selector(cloudKitContainerOptions),
-                (IMP)hook_cloudKitContainerOptions,
-                (IMP*)&orig_cloudKitContainerOptions);
-            
-            LOG("NSPersistentStoreDescription 후킹 완료");
-        }
-
-        // ── [2] CKContainer 팩토리 메서드 후킹 ──
-        Class ckClass = objc_getClass("CKContainer");
-        if (ckClass) {
-            safe_swizzle_class(ckClass,
-                @selector(defaultContainer),
-                (IMP)hook_ck_defaultContainer,
-                (IMP*)&orig_ck_defaultContainer);
-            
-            safe_swizzle_class(ckClass,
-                @selector(containerWithIdentifier:),
-                (IMP)hook_ck_containerWithIdentifier,
-                (IMP*)&orig_ck_containerWithIdentifier);
-            
-            LOG("CKContainer 팩토리 후킹 완료");
-        }
-
         // ── [3] NSPersistentCloudKitContainer 초기화 후킹 ──
         Class ckContainerClass = objc_getClass("NSPersistentCloudKitContainer");
         if (ckContainerClass) {
@@ -377,7 +388,7 @@ static void GNCloudKitFix_initialize(void) {
                 (IMP)hook_loadPersistentStores,
                 (IMP*)&orig_loadPersistentStores);
             
-            LOG("NSPersistentCloudKitContainer 후킹 완료");
+            LOG("NSPersistentCloudKitContainer 후킹 완료 (지연)");
         }
 
         // ── [4] NSUbiquitousKeyValueStore 차단 ──
@@ -388,11 +399,11 @@ static void GNCloudKitFix_initialize(void) {
                 (IMP)hook_kv_synchronize,
                 (IMP*)&orig_kv_synchronize);
             
-            LOG("NSUbiquitousKeyValueStore 후킹 완료");
+            LOG("NSUbiquitousKeyValueStore 후킹 완료 (지연)");
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix 초기화 완료 (Deferred Active)       ");
+        LOG("  GNCloudKitFix v4.2 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }

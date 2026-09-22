@@ -216,30 +216,34 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
 }
 
 static void seedUserDefaultsCache(void) {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
-    NSError *error = nil;
-    NSDictionary *mockDict = [NSJSONSerialization JSONObjectWithData:mockData options:0 error:&error];
-    
-    if (mockDict && [mockDict isKindOfClass:[NSDictionary class]]) {
-        [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
-        [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
-        [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.customerInfo"];
+    @try {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
+        NSError *error = nil;
+        NSDictionary *mockDict = [NSJSONSerialization JSONObjectWithData:mockData options:0 error:&error];
+        
+        if (mockDict && [mockDict isKindOfClass:[NSDictionary class]]) {
+            [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
+            [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
+            [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.customerInfo"];
+        }
+        
+        [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
+        [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
+        [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
+        [defaults setBool:YES forKey:@"com.goodnotes.gn6_unlocked"];
+        [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
+        
+        [defaults synchronize];
+        NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v8.2).");
+    } @catch (NSException *exception) {
+        NSLog(@"[GN7RevenueCatFix] Caught exception while seeding NSUserDefaults: %@", exception);
     }
-    
-    [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
-    [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
-    [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
-    [defaults setBool:YES forKey:@"com.goodnotes.gn6_unlocked"];
-    [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
-    
-    [defaults synchronize];
-    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v8.1).");
 }
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.1 (Dyld Safe)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.2 (Dyld Safe)...");
     
     // Register custom NSURLProtocol safely during constructor
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
@@ -257,8 +261,9 @@ static void GN7RevenueCatFixInit(void) {
         method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
     }
 
-    // Safely seed NSUserDefaults on main dispatch queue once main runloop starts
-    dispatch_async(dispatch_get_main_queue(), ^{
+    // Delay 0.5s on main queue to ensure CFPreferences and app sandboxed preferences plist search paths are fully initialized
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         seedUserDefaultsCache();
     });
 }
+

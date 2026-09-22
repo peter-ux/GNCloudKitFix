@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
 static NSString *const kGN7MockCustomerInfoJSON = @"{\n"
@@ -222,13 +223,11 @@ static void seedUserDefaultsCache(void) {
     NSDictionary *mockDict = [NSJSONSerialization JSONObjectWithData:mockData options:0 error:&error];
     
     if (mockDict && [mockDict isKindOfClass:[NSDictionary class]]) {
-        // Seed as NSDictionary so Swift can bridge as [String: Any] seamlessly via Dictionary._unconditionallyBridgeFromObjectiveC
         [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
         [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
         [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.customerInfo"];
     }
     
-    // Also store string / numeric defaults expected by Goodnotes 7
     [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
     [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
     [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
@@ -236,15 +235,14 @@ static void seedUserDefaultsCache(void) {
     [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
     
     [defaults synchronize];
-    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v7.0).");
+    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v8.0).");
 }
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v7.0...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.0 (Dyld Safe)...");
     
-    seedUserDefaultsCache();
-
+    // Register custom NSURLProtocol safely during constructor
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol");
 
@@ -259,4 +257,12 @@ static void GN7RevenueCatFixInit(void) {
         orig_ephemeralSessionConfiguration = (void *)method_getImplementation(m_eph);
         method_setImplementation(m_eph, (IMP)swizzled_ephemeralSessionConfiguration);
     }
+
+    // Safely seed NSUserDefaults after dyld finishes constructor loading and Foundation is ready
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification * _Nonnull note) {
+        seedUserDefaultsCache();
+    }];
 }

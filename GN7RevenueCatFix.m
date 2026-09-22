@@ -217,11 +217,33 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.4 (Pure Dynamic Interception)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.5 (Full Session Interception)...");
     
-    // Register custom NSURLProtocol safely during constructor
+    // Register custom NSURLProtocol for shared sessions
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol successfully.");
+    
+    // Swizzle NSURLSessionConfiguration to inject GN7URLProtocol into ALL sessions
+    // (RevenueCat uses ephemeral/custom sessions that bypass NSURLProtocol.registerClass)
+    Class configClass = object_getClass(objc_getClass("NSURLSessionConfiguration"));
+    if (configClass) {
+        Method defaultMethod = class_getClassMethod(objc_getClass("NSURLSessionConfiguration"), @selector(defaultSessionConfiguration));
+        Method ephemeralMethod = class_getClassMethod(objc_getClass("NSURLSessionConfiguration"), @selector(ephemeralSessionConfiguration));
+        
+        if (defaultMethod) {
+            orig_defaultSessionConfiguration = (void *)method_getImplementation(defaultMethod);
+            method_setImplementation(defaultMethod, (IMP)swizzled_defaultSessionConfiguration);
+            NSLog(@"[GN7RevenueCatFix] Swizzled defaultSessionConfiguration");
+        }
+        
+        if (ephemeralMethod) {
+            orig_ephemeralSessionConfiguration = (void *)method_getImplementation(ephemeralMethod);
+            method_setImplementation(ephemeralMethod, (IMP)swizzled_ephemeralSessionConfiguration);
+            NSLog(@"[GN7RevenueCatFix] Swizzled ephemeralSessionConfiguration");
+        }
+    }
+    
+    NSLog(@"[GN7RevenueCatFix] v8.5 initialization complete — all URL sessions intercepted.");
 }
 
 

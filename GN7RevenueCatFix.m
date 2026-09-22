@@ -218,24 +218,30 @@ static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self
 static void seedUserDefaultsCache(void) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSData *mockData = [kGN7MockCustomerInfoJSON dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *error = nil;
+    NSDictionary *mockDict = [NSJSONSerialization JSONObjectWithData:mockData options:0 error:&error];
     
-    [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
-    [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
-    [defaults setObject:mockData forKey:@"com.revenuecat.userdefaults.customerInfo"];
+    if (mockDict && [mockDict isKindOfClass:[NSDictionary class]]) {
+        // Seed as NSDictionary so Swift can bridge as [String: Any] seamlessly via Dictionary._unconditionallyBridgeFromObjectiveC
+        [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchasedEntitlements"];
+        [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.purchaserInfo"];
+        [defaults setObject:mockDict forKey:@"com.revenuecat.userdefaults.customerInfo"];
+    }
+    
+    // Also store string / numeric defaults expected by Goodnotes 7
     [defaults setObject:@"gn7_pro_user" forKey:@"com.revenuecat.userdefaults.appUserID"];
     [defaults setObject:[NSDate date] forKey:@"com.revenuecat.userdefaults.purchaserInfoLastUpdated"];
-    
     [defaults setBool:YES forKey:@"com.goodnotes.allow_override_entitlements"];
     [defaults setBool:YES forKey:@"com.goodnotes.gn6_unlocked"];
     [defaults setObject:@"pro" forKey:@"com.goodnotes.current_plan"];
     
     [defaults synchronize];
-    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with Goodnotes 7 CustomerInfo cache (v6.0).");
+    NSLog(@"[GN7RevenueCatFix] Successfully pre-seeded NSUserDefaults with NSDictionary CustomerInfo cache (v7.0).");
 }
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v6.0...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v7.0...");
     
     seedUserDefaultsCache();
 

@@ -299,7 +299,8 @@ static void hook_loadPersistentStores(id self, SEL _cmd, void (^block)(NSPersist
 static BOOL (*orig_kv_synchronize)(id, SEL) = NULL;
 static BOOL hook_kv_synchronize(id self, SEL _cmd) {
     return NO;
-// ─────────────────────────────────────────────────────────────────
+}
+
 // [5] AVAudioSession 훅 — 제거됨 (v4.6)
 // sharedInstance에서 nil 반환 시 SwiftUI/UIKit 크래시 유발.
 // AudioSession 데드락은 Goodnotes/iOS 27 자체 타이밍 문제이며,

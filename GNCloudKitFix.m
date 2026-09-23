@@ -301,11 +301,32 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
     return NO;
 }
 
-// [5] AVAudioSession 훅 — 제거됨 (v4.6)
-// sharedInstance에서 nil 반환 시 SwiftUI/UIKit 크래시 유발.
-// AudioSession 데드락은 Goodnotes/iOS 27 자체 타이밍 문제이며,
-// 우리 dylib이 원인이 아님. 간섭하지 않는 것이 안전.
 // ─────────────────────────────────────────────────────────────────
+// [5] AVAudioSession 데드락 방지 — Pre-warm 전략 (v4.7)
+// iOS 27에서 AudioSession 초기화가 메인 스레드와 RootQueue 사이에서
+// 데드락을 유발함. constructor에서 백그라운드 스레드로 미리
+// AVAudioSession.sharedInstance를 호출하여 내부 dispatch_once를
+// 완료시키면 이후 메인 스레드 접근 시 데드락 없이 바로 반환됨.
+// ─────────────────────────────────────────────────────────────────
+static void prewarm_audio_session(void) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+        @try {
+            Class audioClass = objc_getClass("AVAudioSession");
+            if (audioClass) {
+                // Force internal initialization on background thread
+                id session = ((id(*)(id, SEL))objc_msgSend)(audioClass, sel_registerName("sharedInstance"));
+                if (session) {
+                    LOG("AVAudioSession pre-warm 성공 (백그라운드 스레드)");
+                } else {
+                    LOG("AVAudioSession pre-warm: sharedInstance nil");
+                }
+            }
+        } @catch (NSException *e) {
+            LOG("AVAudioSession pre-warm 예외: %@", e.reason);
+        }
+    });
+}
+
 
 
 // ─────────────────────────────────────────────────────────────────
@@ -314,7 +335,7 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  GNCloudKitFix v4.6 (Clean CloudKit Only) 로드        ");
+    LOG("  GNCloudKitFix v4.7 (AudioSession PreWarm) 로드     ");
     LOG("══════════════════════════════════════════════════");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -361,6 +382,9 @@ static void GNCloudKitFix_initialize(void) {
 
     LOG("Phase 1 완료 — CloudKit 예외 방어 활성화");
 
+    // ── [5] AudioSession 데드락 방지: 백그라운드 pre-warm ──
+    prewarm_audio_session();
+
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PHASE 2: DEFERRED (main queue) — Heavier hooks after system init
     // NSPersistentCloudKitContainer + NSUbiquitousKeyValueStore
@@ -399,7 +423,7 @@ static void GNCloudKitFix_initialize(void) {
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.6 초기화 완료 (Hybrid Active)    ");
+        LOG("  GNCloudKitFix v4.7 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }

@@ -29,7 +29,6 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
-#import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <dlfcn.h>
@@ -300,75 +299,13 @@ static void hook_loadPersistentStores(id self, SEL _cmd, void (^block)(NSPersist
 static BOOL (*orig_kv_synchronize)(id, SEL) = NULL;
 static BOOL hook_kv_synchronize(id self, SEL _cmd) {
     return NO;
-}
-
 // ─────────────────────────────────────────────────────────────────
-// [5] AVAudioSession 안전 훅 — iOS 27 AudioSession 데드락 방지
-// 앱 런치 후 3초간 모든 AudioSession 설정 호출을 차단하고
-// 이후 정상 동작으로 전환. sharedInstance 접근 자체도 지연.
+// [5] AVAudioSession 훅 — 제거됨 (v4.6)
+// sharedInstance에서 nil 반환 시 SwiftUI/UIKit 크래시 유발.
+// AudioSession 데드락은 Goodnotes/iOS 27 자체 타이밍 문제이며,
+// 우리 dylib이 원인이 아님. 간섭하지 않는 것이 안전.
 // ─────────────────────────────────────────────────────────────────
-static CFAbsoluteTime gAppLaunchTime = 0;
-static BOOL isInLaunchWindow(void) {
-    if (gAppLaunchTime == 0) gAppLaunchTime = CFAbsoluteTimeGetCurrent();
-    return (CFAbsoluteTimeGetCurrent() - gAppLaunchTime) < 3.0;
-}
 
-static id (*orig_sharedInstance)(id, SEL) = NULL;
-static id hook_sharedInstance(id self, SEL _cmd) {
-    if (isInLaunchWindow() && ![NSThread isMainThread]) {
-        // Block non-main-thread access during launch to prevent RootQueue deadlock
-        LOG("AVAudioSession.sharedInstance 차단 (런치 윈도우, 비메인스레드)");
-        return nil;
-    }
-    if (orig_sharedInstance) {
-        return orig_sharedInstance(self, _cmd);
-    }
-    return nil;
-}
-
-static BOOL (*orig_setCategory_mode_options_error)(id, SEL, AVAudioSessionCategory, AVAudioSessionMode, AVAudioSessionCategoryOptions, NSError**) = NULL;
-static BOOL hook_setCategory_mode_options_error(id self, SEL _cmd, AVAudioSessionCategory category, AVAudioSessionMode mode, AVAudioSessionCategoryOptions options, NSError **outError) {
-    if (isInLaunchWindow()) {
-        LOG("AVAudioSession setCategory 차단 (런치 윈도우): %@", category);
-        // Schedule deferred execution after launch window
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSError *err = nil;
-            if (orig_setCategory_mode_options_error) {
-                orig_setCategory_mode_options_error(self, _cmd, category, mode, options, &err);
-            }
-            if (err) {
-                LOG("⚠️ 지연된 setCategory 에러: %@", err);
-            } else {
-                LOG("✅ 지연된 setCategory 성공: %@", category);
-            }
-        });
-        return YES;
-    }
-    if (orig_setCategory_mode_options_error) {
-        return orig_setCategory_mode_options_error(self, _cmd, category, mode, options, outError);
-    }
-    return YES;
-}
-
-static BOOL (*orig_setActive_options_error)(id, SEL, BOOL, AVAudioSessionSetActiveOptions, NSError**) = NULL;
-static BOOL hook_setActive_options_error(id self, SEL _cmd, BOOL active, AVAudioSessionSetActiveOptions options, NSError **outError) {
-    if (isInLaunchWindow()) {
-        LOG("AVAudioSession setActive 차단 (런치 윈도우): %@", active ? @"YES" : @"NO");
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSError *err = nil;
-            if (orig_setActive_options_error) {
-                orig_setActive_options_error(self, _cmd, active, options, &err);
-            }
-        });
-        return YES;
-    }
-    if (orig_setActive_options_error) {
-        return orig_setActive_options_error(self, _cmd, active, options, outError);
-    }
-    return YES;
-}
 
 // ─────────────────────────────────────────────────────────────────
 // 생성자: dylib 로드 시 1회 실행
@@ -376,7 +313,7 @@ static BOOL hook_setActive_options_error(id self, SEL _cmd, BOOL active, AVAudio
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  GNCloudKitFix v4.5 (AudioSession Block) 로드        ");
+    LOG("  GNCloudKitFix v4.6 (Clean CloudKit Only) 로드        ");
     LOG("══════════════════════════════════════════════════");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -385,10 +322,9 @@ static void GNCloudKitFix_initialize(void) {
     // These prevent CloudKit entitlement exceptions during app delegate init
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    // CoreData/CloudKit/AVFoundation 프레임워크 강제 로드
+    // CoreData/CloudKit 프레임워크 강제 로드
     dlopen("/System/Library/Frameworks/CoreData.framework/CoreData", RTLD_NOW | RTLD_GLOBAL);
     dlopen("/System/Library/Frameworks/CloudKit.framework/CloudKit", RTLD_NOW | RTLD_GLOBAL);
-    dlopen("/System/Library/Frameworks/AVFoundation.framework/AVFoundation", RTLD_NOW | RTLD_GLOBAL);
 
     // ── [1] NSPersistentStoreDescription CloudKit 옵션 무력화 ──
     Class descClass = objc_getClass("NSPersistentStoreDescription");
@@ -422,29 +358,7 @@ static void GNCloudKitFix_initialize(void) {
         LOG("CKContainer 팩토리 후킹 완료 (즉시)");
     }
 
-    // ── [5] AVAudioSession 데드락 방지 후킹 ──
-    Class audioClass = objc_getClass("AVAudioSession");
-    if (audioClass) {
-        // sharedInstance 접근 차단 (비메인스레드, 런치 윈도우)
-        safe_swizzle_class(audioClass,
-            @selector(sharedInstance),
-            (IMP)hook_sharedInstance,
-            (IMP*)&orig_sharedInstance);
-        
-        safe_swizzle_instance(audioClass,
-            @selector(setCategory:mode:options:error:),
-            (IMP)hook_setCategory_mode_options_error,
-            (IMP*)&orig_setCategory_mode_options_error);
-        
-        safe_swizzle_instance(audioClass,
-            @selector(setActive:withOptions:error:),
-            (IMP)hook_setActive_options_error,
-            (IMP*)&orig_setActive_options_error);
-        
-        LOG("AVAudioSession 데드락 방지 후킹 완료 (sharedInstance + setCategory + setActive)");
-    }
-
-    LOG("Phase 1 완료 — CloudKit + AudioSession 방어 활성화");
+    LOG("Phase 1 완료 — CloudKit 예외 방어 활성화");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PHASE 2: DEFERRED (main queue) — Heavier hooks after system init
@@ -484,7 +398,7 @@ static void GNCloudKitFix_initialize(void) {
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.5 초기화 완료 (Hybrid Active)    ");
+        LOG("  GNCloudKitFix v4.6 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }

@@ -190,60 +190,19 @@ static BOOL shouldInterceptURL(NSURL *url) {
 
 @end
 
-static NSURLSessionConfiguration *(*orig_defaultSessionConfiguration)(id self, SEL _cmd);
-static NSURLSessionConfiguration *(*orig_ephemeralSessionConfiguration)(id self, SEL _cmd);
-
-static NSURLSessionConfiguration *swizzled_defaultSessionConfiguration(id self, SEL _cmd) {
-    NSURLSessionConfiguration *config = orig_defaultSessionConfiguration(self, _cmd);
-    NSMutableArray *protocols = [config.protocolClasses mutableCopy];
-    if (!protocols) protocols = [NSMutableArray array];
-    if (![protocols containsObject:[GN7URLProtocol class]]) {
-        [protocols insertObject:[GN7URLProtocol class] atIndex:0];
-        config.protocolClasses = protocols;
-    }
-    return config;
-}
-
-static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self, SEL _cmd) {
-    NSURLSessionConfiguration *config = orig_ephemeralSessionConfiguration(self, _cmd);
-    NSMutableArray *protocols = [config.protocolClasses mutableCopy];
-    if (!protocols) protocols = [NSMutableArray array];
-    if (![protocols containsObject:[GN7URLProtocol class]]) {
-        [protocols insertObject:[GN7URLProtocol class] atIndex:0];
-        config.protocolClasses = protocols;
-    }
-    return config;
-}
+// NSURLSessionConfiguration 스위즐링 제거됨 (v8.6)
+// 전역 세션 스위즐링은 UIKit/WebKit 내부 세션도 오염시켜
+// _UILabelDirectImpl 등에서 objc_lookUpImpOrForward 크래시 유발.
+// NSURLProtocol.registerClass만으로 충분 — shared/default 세션 커버.
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.5 (Full Session Interception)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.6 (Safe NSURLProtocol Only)...");
     
-    // Register custom NSURLProtocol for shared sessions
+    // Register custom NSURLProtocol — covers shared and default sessions
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
     NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol successfully.");
     
-    // Swizzle NSURLSessionConfiguration to inject GN7URLProtocol into ALL sessions
-    // (RevenueCat uses ephemeral/custom sessions that bypass NSURLProtocol.registerClass)
-    Class configClass = object_getClass(objc_getClass("NSURLSessionConfiguration"));
-    if (configClass) {
-        Method defaultMethod = class_getClassMethod(objc_getClass("NSURLSessionConfiguration"), @selector(defaultSessionConfiguration));
-        Method ephemeralMethod = class_getClassMethod(objc_getClass("NSURLSessionConfiguration"), @selector(ephemeralSessionConfiguration));
-        
-        if (defaultMethod) {
-            orig_defaultSessionConfiguration = (void *)method_getImplementation(defaultMethod);
-            method_setImplementation(defaultMethod, (IMP)swizzled_defaultSessionConfiguration);
-            NSLog(@"[GN7RevenueCatFix] Swizzled defaultSessionConfiguration");
-        }
-        
-        if (ephemeralMethod) {
-            orig_ephemeralSessionConfiguration = (void *)method_getImplementation(ephemeralMethod);
-            method_setImplementation(ephemeralMethod, (IMP)swizzled_ephemeralSessionConfiguration);
-            NSLog(@"[GN7RevenueCatFix] Swizzled ephemeralSessionConfiguration");
-        }
-    }
-    
-    NSLog(@"[GN7RevenueCatFix] v8.5 initialization complete — all URL sessions intercepted.");
+    NSLog(@"[GN7RevenueCatFix] v8.6 initialization complete.");
 }
-
 

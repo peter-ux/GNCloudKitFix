@@ -190,19 +190,66 @@ static BOOL shouldInterceptURL(NSURL *url) {
 
 @end
 
-// NSURLSessionConfiguration 스위즐링 제거됨 (v8.6)
-// 전역 세션 스위즐링은 UIKit/WebKit 내부 세션도 오염시켜
-// _UILabelDirectImpl 등에서 objc_lookUpImpOrForward 크래시 유발.
-// NSURLProtocol.registerClass만으로 충분 — shared/default 세션 커버.
+// ─────────────────────────────────────────────────────────────────
+// NSURLSessionConfiguration 스위즐링 — Thread-Safe (v8.7)
+// RevenueCat SDK는 ephemeral 세션을 사용하므로
+// NSURLProtocol.registerClass만으로는 인터셉트 불가.
+// @synchronized + immutable copy로 thread-safety 보장.
+// ─────────────────────────────────────────────────────────────────
+static NSURLSessionConfiguration *(*orig_defaultSessionConfiguration)(id self, SEL _cmd);
+static NSURLSessionConfiguration *(*orig_ephemeralSessionConfiguration)(id self, SEL _cmd);
+
+static NSURLSessionConfiguration *swizzled_defaultSessionConfiguration(id self, SEL _cmd) {
+    NSURLSessionConfiguration *config = orig_defaultSessionConfiguration(self, _cmd);
+    @synchronized([GN7URLProtocol class]) {
+        NSArray *existing = config.protocolClasses;
+        if (![existing containsObject:[GN7URLProtocol class]]) {
+            NSMutableArray *protocols = existing ? [existing mutableCopy] : [NSMutableArray array];
+            [protocols insertObject:[GN7URLProtocol class] atIndex:0];
+            config.protocolClasses = [protocols copy]; // immutable copy for thread safety
+        }
+    }
+    return config;
+}
+
+static NSURLSessionConfiguration *swizzled_ephemeralSessionConfiguration(id self, SEL _cmd) {
+    NSURLSessionConfiguration *config = orig_ephemeralSessionConfiguration(self, _cmd);
+    @synchronized([GN7URLProtocol class]) {
+        NSArray *existing = config.protocolClasses;
+        if (![existing containsObject:[GN7URLProtocol class]]) {
+            NSMutableArray *protocols = existing ? [existing mutableCopy] : [NSMutableArray array];
+            [protocols insertObject:[GN7URLProtocol class] atIndex:0];
+            config.protocolClasses = [protocols copy];
+        }
+    }
+    return config;
+}
 
 __attribute__((constructor))
 static void GN7RevenueCatFixInit(void) {
-    NSLog(@"[GN7RevenueCatFix] Initializing Goodnotes 7 RevenueCat & Entitlement Hook v8.6 (Safe NSURLProtocol Only)...");
+    NSLog(@"[GN7RevenueCatFix] Initializing v8.7 (Thread-Safe Session Interception)...");
     
-    // Register custom NSURLProtocol — covers shared and default sessions
+    // Register custom NSURLProtocol for shared/default sessions
     [NSURLProtocol registerClass:[GN7URLProtocol class]];
-    NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol successfully.");
+    NSLog(@"[GN7RevenueCatFix] Registered GN7URLProtocol.");
     
-    NSLog(@"[GN7RevenueCatFix] v8.6 initialization complete.");
+    // Swizzle NSURLSessionConfiguration for ephemeral sessions (RevenueCat)
+    Method defaultMethod = class_getClassMethod(
+        objc_getClass("NSURLSessionConfiguration"), @selector(defaultSessionConfiguration));
+    Method ephemeralMethod = class_getClassMethod(
+        objc_getClass("NSURLSessionConfiguration"), @selector(ephemeralSessionConfiguration));
+    
+    if (defaultMethod) {
+        orig_defaultSessionConfiguration = (void *)method_getImplementation(defaultMethod);
+        method_setImplementation(defaultMethod, (IMP)swizzled_defaultSessionConfiguration);
+        NSLog(@"[GN7RevenueCatFix] Swizzled defaultSessionConfiguration");
+    }
+    
+    if (ephemeralMethod) {
+        orig_ephemeralSessionConfiguration = (void *)method_getImplementation(ephemeralMethod);
+        method_setImplementation(ephemeralMethod, (IMP)swizzled_ephemeralSessionConfiguration);
+        NSLog(@"[GN7RevenueCatFix] Swizzled ephemeralSessionConfiguration");
+    }
+    
+    NSLog(@"[GN7RevenueCatFix] v8.7 initialization complete.");
 }
-

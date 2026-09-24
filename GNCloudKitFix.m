@@ -301,11 +301,30 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
     return NO;
 }
 
-// [5] AudioSession 데드락 — 훅으로 해결 불가
-// v4.3~4.5: sharedInstance nil 반환 → SwiftUI 크래시
-// v4.7: pre-warm → 효과 없음 (데드락 지속)
-// AudioSession 데드락은 iOS 27 + sideloading 환경의 근본적 한계.
-// 간섭하지 않는 것이 최선.
+// ─────────────────────────────────────────────────────────────────
+// [5] AudioSession 데드락 방지 — 동기 초기화 (v4.9)
+// constructor는 메인 스레드에서 실행됨. 이 시점에 AVAudioSession을
+// 동기적으로 초기화하면 내부 dispatch_once가 완료되어,
+// 이후 앱의 백그라운드 스레드에서 접근 시 경합 없이 즉시 반환.
+// (v4.7의 async pre-warm은 효과 없었음 — 동기가 핵심)
+// ─────────────────────────────────────────────────────────────────
+static void force_audio_session_init(void) {
+    @try {
+        // AVFoundation 프레임워크 로드
+        dlopen("/System/Library/Frameworks/AVFoundation.framework/AVFoundation", RTLD_NOW | RTLD_GLOBAL);
+        
+        Class audioClass = objc_getClass("AVAudioSession");
+        if (audioClass) {
+            // 동기적으로 sharedInstance 호출 — dispatch_once 완료
+            id session = ((id(*)(id, SEL))objc_msgSend)(audioClass, sel_registerName("sharedInstance"));
+            if (session) {
+                LOG("AVAudioSession 동기 초기화 완료 (메인 스레드)");
+            }
+        }
+    } @catch (NSException *e) {
+        LOG("AVAudioSession 초기화 예외: %@", e.reason);
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────
 // 생성자: dylib 로드 시 1회 실행
@@ -313,8 +332,9 @@ static BOOL hook_kv_synchronize(id self, SEL _cmd) {
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  GNCloudKitFix v4.8 (Clean CloudKit) 로드         ");
+    LOG("  GNCloudKitFix v4.9 (Sync AudioInit) 로드        ");
     LOG("══════════════════════════════════════════════════");
+
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PHASE 1: IMMEDIATE (constructor) — Must run before didFinishLaunching
@@ -360,6 +380,9 @@ static void GNCloudKitFix_initialize(void) {
 
     LOG("Phase 1 완료 — CloudKit 예외 방어 활성화");
 
+    // ── [5] AudioSession 데드락 방지: 메인 스레드에서 동기 초기화 ──
+    force_audio_session_init();
+
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PHASE 2: DEFERRED (main queue) — Heavier hooks after system init
     // NSPersistentCloudKitContainer + NSUbiquitousKeyValueStore
@@ -398,7 +421,7 @@ static void GNCloudKitFix_initialize(void) {
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.8 초기화 완료 (Hybrid Active)    ");
+        LOG("  GNCloudKitFix v4.9 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }

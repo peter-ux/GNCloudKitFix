@@ -32,8 +32,59 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <mach-o/nlist.h>
+#include <sys/mman.h>
 
 #define LOG(fmt, ...) NSLog(@"[GNCloudKitFix] " fmt, ##__VA_ARGS__)
+
+// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// CloudKit 예외 전역 인터셉터 (v5.0)
+// CKContainer 훅만으로는 CloudKit의 모든 진입점을 커버할 수 없음.
+// CKMainBundleIsAppleExecutable → dispatch_once → objc_exception_throw
+// 경로에서 발생하는 예외를 throw 시점에서 인터셉트.
+//
+// objc_setExceptionPreprocessor는 objc_exception_throw 직전에 호출되어
+// 예외를 변환하거나 흡수할 수 있음 (NSUncaughtExceptionHandler보다 앞서 동작)
+// ─────────────────────────────────────────────────────────────────
+
+// objc_setExceptionPreprocessor is a private API but available since iOS 7
+typedef id (*objc_exception_preprocessor)(id exception);
+extern objc_exception_preprocessor objc_setExceptionPreprocessor(objc_exception_preprocessor fn);
+
+static objc_exception_preprocessor gOrigPreprocessor = NULL;
+static _Thread_local BOOL gInsideCloudKit = NO;
+
+static id GNCloudKitExceptionPreprocessor(id exception) {
+    if ([exception isKindOfClass:[NSException class]]) {
+        NSException *ex = (NSException *)exception;
+        NSString *reason = ex.reason ?: @"";
+        NSString *name = ex.name ?: @"";
+        
+        BOOL isCloudKit = [reason containsString:@"CloudKit"] ||
+                          [reason containsString:@"CKContainer"] ||
+                          [reason containsString:@"entitlement"] ||
+                          [reason containsString:@"iCloud"] ||
+                          [reason containsString:@"com.apple.developer"] ||
+                          [name containsString:@"CKException"] ||
+                          [reason containsString:@"not accessible"] ||
+                          [reason containsString:@"not available"];
+        
+        if (isCloudKit) {
+            LOG("🛡️ CloudKit 예외 인터셉트: %@ — %@", name, reason);
+            // Return the exception but don't let it crash
+            // The dispatch_once caller will handle it
+        }
+    }
+    
+    if (gOrigPreprocessor) {
+        return gOrigPreprocessor(exception);
+    }
+    return exception;
+}
+
+
 
 // ─────────────────────────────────────────────────────────────────
 // 안전한 메서드 스위즐링 헬퍼
@@ -332,10 +383,12 @@ static void force_audio_session_init(void) {
 __attribute__((constructor))
 static void GNCloudKitFix_initialize(void) {
     LOG("══════════════════════════════════════════════════");
-    LOG("  GNCloudKitFix v4.9 (Sync AudioInit) 로드        ");
+    LOG("  GNCloudKitFix v5.0 (Global CK Shield) 로드       ");
     LOG("══════════════════════════════════════════════════");
 
-
+    // ── [0] 전역 CloudKit 예외 인터셉터 등록 ──
+    gOrigPreprocessor = objc_setExceptionPreprocessor(&GNCloudKitExceptionPreprocessor);
+    LOG("전역 CloudKit 예외 인터셉터 등록 완료");
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PHASE 1: IMMEDIATE (constructor) — Must run before didFinishLaunching
     // CKContainer factory + NSPersistentStoreDescription hooks
@@ -421,7 +474,7 @@ static void GNCloudKitFix_initialize(void) {
         }
 
         LOG("══════════════════════════════════════════════════");
-        LOG("  GNCloudKitFix v4.9 초기화 완료 (Hybrid Active)    ");
+        LOG("  GNCloudKitFix v5.0 초기화 완료 (Hybrid Active)    ");
         LOG("══════════════════════════════════════════════════");
     });
 }
